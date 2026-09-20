@@ -7,7 +7,7 @@ from app import models as M
 from app.core.db import get_db
 from app.core.security import require_key
 from app.services import risk_service
-from app.services.db_utils import upsert
+from app.services.db_utils import set_provenance, upsert
 
 router = APIRouter(prefix="/ingest", tags=["ingest"], dependencies=[Depends(require_key)])
 
@@ -74,6 +74,8 @@ def ingest(kind: str, file: UploadFile = File(...), db: Session = Depends(get_db
     df = df[[c for c in df.columns if c in cols]]
     rows = df.astype(object).where(df.notna(), None).to_dict("records")
     upsert(db, Model, rows, keys)
+    set_provenance(db, kind, "uploaded",
+                   f"{len(rows)} rows from {file.filename or 'CSV'} ({df['date'].min()} to {df['date'].max()})")
     risk_service.cache.clear()
     return {"kind": kind, "rows": len(rows),
             "date_min": str(df["date"].min()), "date_max": str(df["date"].max())}

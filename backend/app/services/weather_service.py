@@ -7,7 +7,7 @@ from app.core.config import settings
 from app.core.db import SessionLocal
 from app.models import Mine, WeatherDaily
 from app.services import risk_service
-from app.services.db_utils import upsert
+from app.services.db_utils import set_provenance, upsert
 
 
 def refresh_weather():
@@ -21,4 +21,6 @@ def refresh_weather():
                          is_forecast=dt.date.fromisoformat(d) > today)
                     for d, v in zip(r["time"], r["precipitation_sum"])]
             upsert(db, WeatherDaily, rows, ["mine_id", "date"])
+        set_provenance(db, "weather", "live",
+                       f"Open-Meteo, refreshed {dt.datetime.now():%Y-%m-%d %H:%M}")
     risk_service.cache.clear()

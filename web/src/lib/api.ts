@@ -19,8 +19,14 @@ export interface Reserve { mine: string; p10_t: number; p50_t: number; p90_t: nu
 export interface Action { id: number; mine: string; kind: string; title: string; detail: Record<string, unknown>; expected_tonnes: number; confidence: number; status: string }
 export interface MineSummary { code: string; name: string; method: string; lat: number; lon: number; level: Level; expected_shortfall_pct: number; reserve_p50_t: number | null }
 
+export interface Provenance { source: string; mode: "synthetic" | "live" | "uploaded" | "unknown"; detail: string; updated_at: string | null }
+export interface Health {
+  status: string; data_mode: string; model_loaded: boolean;
+  provenance: Provenance[]; synthetic_sources: string[];
+}
+
 export const api = {
-  health: () => j<{ status: string; data_mode: string; model_loaded: boolean }>("/health"),
+  health: () => j<Health>("/health"),
   mines: () => j<MineSummary[]>("/mines"),
   risk: (mine: string, h = 7) => j<Risk>(`/risk/${mine}?horizon=${h}`),
   reserves: (mine: string) => j<Reserve>(`/reserves/${mine}`),

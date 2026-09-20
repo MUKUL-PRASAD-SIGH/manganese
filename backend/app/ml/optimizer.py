@@ -25,11 +25,26 @@ def _solve(units, slots, value, allow_move):
     return assign, float(pl.value(prob.objective) or 0.0)
 
 
-def redeploy(units, slots, weather_loss, horizon=7, transfer_loss=0.10, min_gain_t=100):
+def redeploy(units, slots, weather_loss, equip_gap=None, horizon=7, transfer_loss=0.10, min_gain_t=100):
     """units: [{id, home, tpd}] healthy only. slots: {mine: n units it needs}.
-    weather_loss: {mine: 0..1} weather-only loss (equipment-neutral)."""
+    weather_loss: {mine: 0..1} weather-only loss (equipment-neutral).
+    equip_gap:    {mine: 0..1} share of output the mine is losing to missing or
+                  broken equipment.
+
+    Weather and equipment pull in opposite directions and must not be conflated:
+    weather makes a unit *less* productive at a mine (you don't send a dumper
+    into a storm), whereas an equipment gap means the mine has *unmet haulage
+    demand*, so a marginal unit there is worth more. Valuing units on weather
+    alone scores the obvious 'Balaghat is a dumper down' move at near zero.
+
+    The gap bonus is linear, so it cancels for units already at home and only
+    prices the unit that actually moves.
+    """
+    gap = equip_gap or {}
+
     def value(u, m):
-        return u["tpd"] * horizon * (1 - weather_loss[m]) * (1 - (transfer_loss if m != u["home"] else 0.0))
+        return (u["tpd"] * horizon * (1 - weather_loss[m]) * (1 + gap.get(m, 0.0))
+                * (1 - (transfer_loss if m != u["home"] else 0.0)))
 
     _, base_obj = _solve(units, slots, value, allow_move=False)
     best, best_obj = _solve(units, slots, value, allow_move=True)

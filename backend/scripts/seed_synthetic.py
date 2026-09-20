@@ -14,6 +14,14 @@ from sqlalchemy import func, text
 from app import models as M
 from app.core.db import Base, SessionLocal, engine
 from app.ml.synth import simulate
+from app.services.db_utils import set_provenance
+
+# The scripted storm hits only the Nagpur-Bhandara cluster, not Balaghat ~100 km
+# east. A localised storm is both more realistic than a region-wide one and the
+# thing that makes the demo work: it opens a weather gap between the storm-hit
+# mines and Balaghat, which is what drives the redeploy optimiser to move a
+# healthy unit into the slot left by Balaghat's broken dumper.
+STORM_MINES = {"KDR", "MNS", "DBZ"}
 
 MINES = [("KDR", "Kandri", "underground", 21.416, 79.266, 300),
          ("MNS", "Mansar", "underground", 21.383, 79.250, 333),
@@ -50,7 +58,7 @@ def main(storm: bool):
             db.add(mine)
             db.commit()      # commit before the to_sql writes below: they use a separate connection
             d = simulate(days, plan, method == "opencast", seed=i)
-            if storm:                                                # scripted demo storm: D+3..D+5
+            if storm and code in STORM_MINES:                        # scripted demo storm: D+3..D+5
                 for k, mm in zip((3, 4, 5), (30, 55, 40)):
                     d.loc[d.date == pd.Timestamp(today + dt.timedelta(days=k)), "rain"] += mm
             hist = d[d.date <= pd.Timestamp(today)].reset_index(drop=True)
@@ -77,6 +85,12 @@ def main(storm: bool):
                     "equipment_daily", engine, if_exists="append", index=False, method="multi", chunksize=5000)
             seed_drillholes(db, mine, rng)
             db.commit()
+
+        # Everything above came out of the synthetic generator: say so, so the
+        # UI badge cannot silently claim this is real MOIL data.
+        note = "app/ml/synth.py" + (" (+ scripted storm D+3..D+5)" if storm else "")
+        for src in ("weather", "production", "equipment", "blasts"):
+            set_provenance(db, src, "synthetic", note)
     print("seeded. next: python -m scripts.train_all")
 
 

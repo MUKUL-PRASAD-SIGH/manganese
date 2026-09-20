@@ -1,7 +1,7 @@
 import datetime as dt
 
 import numpy as np
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from app.ml.optimizer import redeploy
@@ -44,17 +44,26 @@ def rule_actions(mine: Mine, r: RiskOut) -> list[dict]:
 def redeploy_actions(db: Session, mines: list[Mine], risks: dict[str, RiskOut]) -> list[dict]:
     by_id = {m.id: m for m in mines}
     units_db = db.scalars(select(EquipmentUnit)).all()
-    latest = {r[0]: r[1] for r in db.execute(
-        select(EquipmentDaily.unit_code, EquipmentDaily.breakdown)
-        .distinct(EquipmentDaily.unit_code)
-        .order_by(EquipmentDaily.unit_code, EquipmentDaily.date.desc()))}
+    # Latest breakdown flag per unit. Uses a window function rather than
+    # PostgreSQL's DISTINCT ON, which SQLite *silently ignores* -- that made this
+    # dict keep each unit's oldest row, so no unit ever looked broken and the
+    # redeploy optimiser never saw a free slot.
+    ranked = select(
+        EquipmentDaily.unit_code,
+        EquipmentDaily.breakdown,
+        func.row_number().over(partition_by=EquipmentDaily.unit_code,
+                               order_by=EquipmentDaily.date.desc()).label("rn"),
+    ).subquery()
+    latest = {r.unit_code: bool(r.breakdown) for r in db.execute(
+        select(ranked.c.unit_code, ranked.c.breakdown).where(ranked.c.rn == 1))}
 
     units = [dict(id=u.code, home=by_id[u.home_mine_id].code, tpd=u.tpd, type=u.type)
              for u in units_db if not latest.get(u.code, False)]
     slots = {m.code: sum(1 for u in units_db if u.home_mine_id == m.id) for m in mines}
 
     wloss = {m.code: risks[m.code].signals["weather_pct"] / 100 for m in mines}
-    res = redeploy(units, slots, wloss, horizon=7)
+    egap = {m.code: risks[m.code].signals.get("equipment_pct", 0.0) / 100 for m in mines}
+    res = redeploy(units, slots, wloss, equip_gap=egap, horizon=7)
     if not res["moves"]:
         return []
     dest = max({mv["to"] for mv in res["moves"]}, key=lambda c: risks[c].expected_loss_t)
