@@ -1,0 +1,5 @@
+# Kept separate from backend/requirements.txt: these are dev-machine only.
+earthengine-api
+geemap
+pandas
+pyarrow

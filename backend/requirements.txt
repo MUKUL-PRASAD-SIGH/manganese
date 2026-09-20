@@ -1,0 +1,21 @@
+fastapi
+uvicorn[standard]
+sqlalchemy>=2.0
+psycopg[binary]
+geoalchemy2
+pydantic-settings
+apscheduler
+httpx
+python-multipart
+pandas
+numpy
+lightgbm
+scikit-learn
+shap
+pykrige
+pulp<4          # 4.0 removes LpVariable(...) and PULP_CBC_CMD, both used in ml/optimizer.py
+joblib
+cachetools
+rasterio
+rio-cogeo
+pytest

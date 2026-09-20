@@ -1,0 +1,21 @@
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    environment: { POSTGRES_USER: moil, POSTGRES_PASSWORD: moil, POSTGRES_DB: moil }
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U moil"], interval: 5s, retries: 10 }
+  api:
+    build: ./backend
+    env_file: .env
+    depends_on: { db: { condition: service_healthy } }
+    # whole data/ is mounted so predict_raster.py can read /data/features and write /data/cogs
+    volumes: ["./backend/artifacts:/app/artifacts", "./data:/data"]
+    ports: ["8000:8000"]
+  titiler:
+    image: ghcr.io/developmentseed/titiler:latest
+    volumes: ["./data/cogs:/data/cogs:ro"]
+    ports: ["8001:8000"]
+  web:
+    build: ./web
+    ports: ["5173:80"]
+volumes: { pgdata: {} }
