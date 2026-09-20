@@ -66,12 +66,17 @@ def redeploy_actions(db: Session, mines: list[Mine], risks: dict[str, RiskOut]) 
     res = redeploy(units, slots, wloss, equip_gap=egap, horizon=7)
     if not res["moves"]:
         return []
-    dest = max({mv["to"] for mv in res["moves"]}, key=lambda c: risks[c].expected_loss_t)
+    dests = {mv["to"] for mv in res["moves"]}
+    dest = max(dests, key=lambda c: risks[c].expected_loss_t)
     dest_mine = next(m for m in mines if m.code == dest)
     frac = min(0.8, res["expected_tonnes"] / max(risks[dest].expected_loss_t, 1.0))
+    n = len(res["moves"])
+    # Only claim a single destination when that is actually true: the previous
+    # title attributed every move to one mine regardless of where units went.
+    title = (f"Redeploy {n} healthy unit(s) to {dest_mine.name}" if len(dests) == 1
+             else f"Redeploy {n} healthy unit(s) across {len(dests)} mines")
     return [dict(mine_id=dest_mine.id, kind="redeploy", confidence=_confidence(risks[dest]),
-                 expected_tonnes=res["expected_tonnes"],
-                 title=f"Redeploy {len(res['moves'])} healthy unit(s) to {dest_mine.name}",
+                 expected_tonnes=res["expected_tonnes"], title=title,
                  detail={"days": None, "recovered_frac": frac,
                          "steps": [f"Move {m['unit']}: {m['from']} → {m['to']}" for m in res["moves"]]})]
 

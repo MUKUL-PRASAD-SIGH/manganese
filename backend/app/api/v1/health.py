@@ -14,6 +14,11 @@ router = APIRouter(tags=["health"])
 # data_provenance table is reported as "unknown", never as live.
 TRACKED = ("weather", "production", "equipment", "blasts")
 
+# Modes that still need disclosure in the UI. "scenario" means real data with a
+# deliberate synthetic overlay (e.g. a scripted storm) -- real enough to cite,
+# not real enough to present unlabelled.
+DISCLOSE = ("synthetic", "unknown", "scenario")
+
 
 @router.get("/health")
 def health(db: Session = Depends(get_db)):
@@ -31,5 +36,5 @@ def health(db: Session = Depends(get_db)):
         "model_loaded": (Path(settings.model_dir) / "shortfall.joblib").exists(),
         "provenance": provenance,
         # convenience for the badge: which sources are not real data
-        "synthetic_sources": [p["source"] for p in provenance if p["mode"] in ("synthetic", "unknown")],
+        "synthetic_sources": [p["source"] for p in provenance if p["mode"] in DISCLOSE],
     }

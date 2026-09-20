@@ -11,17 +11,22 @@ const link = ({ isActive }: { isActive: boolean }) =>
 
 /**
  * Honesty badge. Reports provenance per source rather than from a single
- * DATA_MODE flag: weather can be live while the ops data is still synthetic,
+ * DATA_MODE flag: weather can be real while the ops data is still synthetic,
  * and a badge that hides in that case overclaims.
+ *
+ * Modes are grouped rather than flattened, so real-but-overlaid data
+ * ("scenario") is not lumped in with fully synthetic data. Describing real
+ * ERA5 rainfall as "synthetic" under-claims just as badly as the reverse
+ * over-claimed.
  */
 function ProvenanceBadge({ health }: { health?: Health }) {
   if (!health) return null;
-  const synth = health.synthetic_sources;
+  const flagged = health.synthetic_sources;
   const tooltip = health.provenance
     .map((p) => `${p.source}: ${p.mode}${p.detail ? ` — ${p.detail}` : ""}`)
     .join("\n");
 
-  if (synth.length === 0) {
+  if (flagged.length === 0) {
     return (
       <span title={tooltip}
         className="ml-auto rounded-full bg-emerald-500/15 px-3 py-1 text-xs font-semibold text-emerald-300 ring-1 ring-emerald-500/40">
@@ -29,11 +34,29 @@ function ProvenanceBadge({ health }: { health?: Health }) {
       </span>
     );
   }
-  const all = synth.length === health.provenance.length;
+
+  const byMode = new Map<string, string[]>();
+  for (const p of health.provenance) {
+    if (!flagged.includes(p.source)) continue;
+    byMode.set(p.mode, [...(byMode.get(p.mode) ?? []), p.source]);
+  }
+  const allSynthetic = byMode.size === 1 && byMode.has("synthetic")
+    && flagged.length === health.provenance.length;
+  // Collapse the three ops feeds to one label when they share a mode, otherwise
+  // the badge is long enough to wrap the header.
+  const OPS = ["production", "equipment", "blasts"];
+  const label = (srcs: string[]) =>
+    OPS.every((o) => srcs.includes(o))
+      ? ["ops", ...srcs.filter((s) => !OPS.includes(s))].join(", ")
+      : srcs.join(", ");
+  const text = allSynthetic
+    ? "Synthetic demo data"
+    : [...byMode].map(([mode, srcs]) => `${mode}: ${label(srcs)}`).join(" · ");
+
   return (
     <span title={tooltip}
-      className="ml-auto rounded-full bg-amber-500/15 px-3 py-1 text-xs font-semibold uppercase text-amber-300 ring-1 ring-amber-500/40">
-      {all ? "Synthetic demo data" : `Synthetic: ${synth.join(" · ")}`}
+      className="ml-auto shrink-0 whitespace-nowrap rounded-full bg-amber-500/15 px-3 py-1 text-xs font-semibold uppercase text-amber-300 ring-1 ring-amber-500/40">
+      {text}
     </span>
   );
 }
