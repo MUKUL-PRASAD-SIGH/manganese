@@ -1,12 +1,17 @@
 from pathlib import Path
+import warnings
 import morecantile
 import numpy as np
 import rasterio
+from rasterio.errors import NotGeoreferencedWarning
 from rasterio.io import MemoryFile
 from rasterio.warp import Resampling, reproject, transform_bounds
 from fastapi import APIRouter, HTTPException, Request, Response
 
 from app.core.config import settings
+
+# Suppress NotGeoreferencedWarning for in-memory PNG tile serialization
+warnings.filterwarnings("ignore", category=NotGeoreferencedWarning)
 
 router = APIRouter(prefix="/prospectivity", tags=["prospectivity"])
 tms = morecantile.tms.get("WebMercatorQuad")
@@ -28,10 +33,13 @@ def meta(request: Request):
     with rasterio.open(cog_file) as src:
         b = transform_bounds(src.crs, "EPSG:4326", *src.bounds)
 
-    # Dynamic Slippy tile URL template served directly by FastAPI
     base = str(request.base_url).rstrip("/")
     tiles = f"{base}/api/v1/prospectivity/tiles/{{z}}/{{x}}/{{y}}.png"
-    return {"tiles": tiles, "bounds": list(b)}
+
+    return {
+        "tiles": tiles,
+        "bounds": [round(x, 4) for x in b]
+    }
 
 
 @router.api_route("/tiles/{z}/{x}/{y}.png", methods=["GET", "HEAD"])

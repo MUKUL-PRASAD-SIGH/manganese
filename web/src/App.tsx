@@ -7,7 +7,9 @@ import Overview from "./pages/Overview";
 import Reserves from "./pages/Reserves";
 
 const link = ({ isActive }: { isActive: boolean }) =>
-  `rounded-lg px-3 py-1.5 text-sm ${isActive ? "bg-slate-800 text-white" : "text-slate-400 hover:text-white"}`;
+  `border px-3 py-1 text-sm ${isActive
+    ? "border-neutral-400 text-neutral-100"
+    : "border-transparent text-neutral-500 hover:text-neutral-200"}`;
 
 /**
  * Honesty badge. Reports provenance per source rather than from a single
@@ -29,8 +31,8 @@ function ProvenanceBadge({ health }: { health?: Health }) {
   if (flagged.length === 0) {
     return (
       <span title={tooltip}
-        className="ml-auto rounded-full bg-emerald-500/15 px-3 py-1 text-xs font-semibold text-emerald-300 ring-1 ring-emerald-500/40">
-        LIVE DATA
+        className="ml-auto shrink-0 whitespace-nowrap border border-emerald-500/60 px-2 py-1 text-[10px] font-medium uppercase tracking-[0.15em] text-emerald-400">
+        Live data
       </span>
     );
   }
@@ -55,7 +57,7 @@ function ProvenanceBadge({ health }: { health?: Health }) {
 
   return (
     <span title={tooltip}
-      className="ml-auto shrink-0 whitespace-nowrap rounded-full bg-amber-500/15 px-3 py-1 text-xs font-semibold uppercase text-amber-300 ring-1 ring-amber-500/40">
+      className="ml-auto shrink-0 whitespace-nowrap border border-amber-500/60 px-2 py-1 text-[10px] font-medium uppercase tracking-[0.15em] text-amber-400">
       {text}
     </span>
   );
@@ -64,9 +66,11 @@ function ProvenanceBadge({ health }: { health?: Health }) {
 export default function App() {
   const health = useQuery({ queryKey: ["health"], queryFn: api.health, refetchInterval: 60_000 });
   return (
-    <div className="mx-auto max-w-[1400px] px-4 py-4">
-      <header className="mb-4 flex items-center gap-3 print:hidden">
-        <div className="text-lg font-bold">⛏ MOIL Manganese Copilot</div>
+    <div className="w-full px-0 py-4">
+      <header className="mb-4 flex items-center gap-4 border-b border-neutral-800 px-4 pb-3 print:hidden">
+        <div className="shrink-0 text-sm font-medium uppercase tracking-[0.2em] text-neutral-100">
+          MOIL Manganese Copilot
+        </div>
         <nav className="flex gap-1">
           <NavLink to="/" end className={link}>Command center</NavLink>
           <NavLink to="/reserves" className={link}>Reserves</NavLink>
@@ -75,12 +79,14 @@ export default function App() {
         </nav>
         <ProvenanceBadge health={health.data} />
       </header>
-      <Routes>
-        <Route path="/" element={<Overview />} />
-        <Route path="/reserves" element={<Reserves />} />
-        <Route path="/actions" element={<Actions />} />
-        <Route path="/ingest" element={<Ingest />} />
-      </Routes>
+      <main className="w-full px-4">
+        <Routes>
+          <Route path="/" element={<Overview />} />
+          <Route path="/reserves" element={<Reserves />} />
+          <Route path="/actions" element={<Actions />} />
+          <Route path="/ingest" element={<Ingest />} />
+        </Routes>
+      </main>
     </div>
   );
 }
