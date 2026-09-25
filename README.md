@@ -1,145 +1,145 @@
 # MOIL Manganese Copilot
 
-**SIH 2026 · PS 26009** — *Using AI/ML and Space Technology to Identify Manganese Reserves and Overcome Production Shortfalls* (MOIL Ltd., Ministry of Steel)
+**SIH 2026 · PS 26009** | Decision support for manganese prospectivity, reserve estimation, and production shortfall response.
 
-Satellites can't see manganese underground. They see **indirect indicators**. So the problem splits into three stages:
+The app combines satellite/geology indicators, drill-hole assays, and mine operations data. It ranks areas to investigate, estimates reserve ranges from assays, forecasts production risk, and simulates operational recommendations. Satellite indicators do **not** directly detect underground ore.
 
-1. **Where to look** — satellite + geology → prospectivity map (LightGBM, spatial block CV)
-2. **How much is there** — drill-hole assays → 3D kriging → tonnage with uncertainty (P10/P50/P90)
-3. **Will we hit the plan** — weather + equipment + blasting → shortfall forecast → optimizer suggests fixes
+## Architecture
 
-Build plan and full design rationale: [`moil_manganese_mvp_plan.md`](moil_manganese_mvp_plan.md) and [`new_sections.md`](new_sections.md).
+```mermaid
+flowchart LR
+	subgraph Sources[Data sources]
+		RS[Satellite and geology rasters]
+		DH[Drill-hole assays]
+		OP[Production, weather, equipment, blasts]
+	end
+	subgraph App[MOIL Copilot]
+		WEB[React dashboard<br/>MapLibre · ECharts]
+		API[FastAPI v1<br/>validation · auth · orchestration]
+		DB[(SQLAlchemy<br/>PostgreSQL/PostGIS or SQLite)]
+		ML[ML and domain services<br/>risk · kriging · recommendations]
+		JOB[APScheduler<br/>weather refresh · action scoring]
+	end
+	RS --> ML
+	DH --> DB
+	OP -->|CSV adapter| API
+	WEB <-->|JSON API| API
+	API <--> DB
+	API --> ML
+	ML <--> DB
+	JOB --> ML
+	JOB --> DB
+```
 
----
+**Request path:** the React client calls the versioned FastAPI routes. Routers enforce request contracts and authentication, then delegate calculations to services. SQLAlchemy persists mine and provenance records; trained models are loaded from `backend/artifacts`. The prospectivity raster workflow is optional and served through TiTiler when a Cloud Optimized GeoTIFF is available.
 
-## Quick start (~30 min to a working demo)
+## Run Locally
+
+### Docker Compose
+
+Requires Docker Desktop/Engine and GNU Make. From the repository root:
 
 ```bash
-cp .env.example .env
-make up          # PostGIS
-make seed        # synthetic history + 14-day forecast with a scripted storm + drill holes
-make train       # trains shortfall.joblib, prints pinball loss + 10-90 coverage
-make run         # api :8000, titiler :8001, web :5173
-make reserves    # kriging for all 5 mines
-make score       # generate corrective actions
-# open http://localhost:5173
+test -f .env || cp .env.example .env  # PowerShell: if (!(Test-Path .env)) { Copy-Item .env.example .env }
+make up                       # start PostGIS
+make seed                     # optional synthetic demo history and drillholes
+make train                    # train shortfall model
+make run                      # API :8000, TiTiler :8001, web :5173
+make reserves                 # optional; requires sufficient assay intervals
 ```
 
-**Checks:** `/docs` loads · `GET /api/v1/mines` returns 5 mines · storm mines show amber/red · Kandri/Mansar/Dongri show a *blast advance* action · Balaghat shows a *redeploy* action (its broken unit is forced in the seed).
+Compose expects `DATABASE_URL=postgresql+psycopg://moil:moil@db:5432/moil` and `MODEL_DIR=/app/artifacts` in `.env` (the defaults in `.env.example`). A native SQLite `.env` is not valid inside the API container.
 
-**Tuning to make the demo land:** if the redeploy action doesn't fire, lower `min_gain_t` or `transfer_loss` in `app/ml/optimizer.py`. If nothing is red, raise the storm rainfall in `scripts/seed_synthetic.py`.
+Open <http://localhost:5173>; API docs are at <http://localhost:8000/docs>. `make down` stops services. Docker is not required for the native setup below.
 
-The prospectivity raster layer is optional and needs real feature rasters: put co-registered GeoTIFFs in `data/features/`, run `scripts/train_prospectivity.py` then `make prosp`. Without it the map simply shows satellite + risk-coloured mine markers.
+### Native Windows (PowerShell)
 
----
+Requires Python 3.10+, Node.js, and npm. From the repository root, prepare the Python environment:
 
-## Layout
-
-```
-├─ docker-compose.yml  .env.example  Makefile
-├─ data/{raw,features,interim,cogs}/
-├─ backend/
-│  ├─ app/
-│  │  ├─ core/{config,db,security}.py
-│  │  ├─ models.py schemas.py           # ORM · Pydantic I/O contracts
-│  │  ├─ api/v1/                        # thin routers
-│  │  ├─ services/                      # fat services: risk, reserve, recommend, weather
-│  │  ├─ ml/{features,dataset,registry,synth,optimizer}.py
-│  │  └─ jobs/scheduler.py
-│  ├─ scripts/{seed_synthetic,train_all,train_prospectivity,predict_raster}.py
-│  ├─ artifacts/                        # shortfall.joblib, prospectivity.joblib
-│  └─ tests/
-├─ pipelines/gee_extract.py             # optional, runs outside the container
-└─ web/                                 # React + Vite + MapLibre + ECharts + Tailwind
+```powershell
+Copy-Item .env.example .env
+py -3.10 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r backend\requirements.txt
+$env:PYTHONPATH = "backend"
 ```
 
-**Design rules:**
+Seed and train only when you want the synthetic demo dataset (skip if using existing or uploaded data):
 
-1. **One feature builder** (`app/ml/features.py`) is used by both training and serving. No train/serve skew.
-2. **Thin routers, fat services.** Routers validate and delegate; ML lives in `app/ml/`.
-3. **Models are artifacts** (`*.joblib`), not code paths. Retraining never touches the API.
-4. **Stateless API + TTL cache.** Scale by adding containers; nightly jobs precompute actions.
-5. **`DATA_MODE=demo|live`.** Demo uses the synthetic generator; live uses real feeds and CSV ingest. The UI shows a "SYNTHETIC DEMO DATA" badge in demo mode.
+```powershell
+.\.venv\Scripts\python.exe -m scripts.seed_synthetic --storm
+.\.venv\Scripts\python.exe -m scripts.train_all
+```
 
----
+Start the API from the repository root:
 
-## API
+```powershell
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
 
-Base `/api/v1`. Auto-docs at <http://localhost:8000/docs> double as a live API demo.
+In a second terminal:
 
-| Method | Path | Purpose |
+```powershell
+cd web
+npm ci
+npm run dev -- --host 127.0.0.1 --port 5174
+```
+
+Open <http://localhost:5174>. The SQLite database path and model directory are set in the root `.env`; configuration is loaded when the API starts, so restart it after changing settings.
+
+## Data Modes and Authentication
+
+`DATA_MODE=demo|live` controls scheduled/live-feed behavior; it does not certify every stored record as live and does not change API authentication.
+
+- **Demo:** `scripts/seed_synthetic.py` generates example operational and drill-hole data. The UI discloses synthetic sources.
+- **Live:** weather can be refreshed from keyless Open-Meteo. Production, equipment, blasts, and assays remain whatever is in the database until real CSV data is uploaded; provenance is shown per source.
+- **API key:** protected operations require `X-API-Key`. The local default is `change-me`; the backend `API_KEY` and frontend `VITE_API_KEY` must match. Live mode does not remove this requirement. Do not use the development default in a deployed environment; a frontend key is visible to browser users.
+
+Use the **Data adapter** page to download templates and upload CSVs. Supported columns:
+
+| Data | Required columns |
+|---|---|
+| Production | `mine_code,date,planned_t,actual_t` |
+| Weather | `mine_code,date,rain_mm` |
+| Blasts | `mine_code,date,delayed` |
+| Equipment | `mine_code,unit_code,date,available_hours,scheduled_hours,breakdown` |
+| Drillholes and assays | `mine_code,hole_code,lat,lon,collar_z,from_m,to_m,mn_pct` (optional `fe_pct`) |
+
+## Models and API
+
+| Capability | Approach | Result |
 |---|---|---|
-| GET | `/health` | Status, `data_mode`, model loaded |
-| GET | `/mines` | Mine list with risk level, shortfall %, reserve P50 |
-| GET | `/risk/{code}?horizon=7` | Daily fan band, drivers, weather-vs-equipment split |
-| GET | `/reserves/{code}` | P10/P50/P90 tonnes, mean grade |
-| POST | `/reserves/{code}/recompute` | Re-run kriging 🔑 |
-| GET | `/actions?mine=` | Open recommendations, ranked by expected tonnes |
-| POST | `/actions/{id}/simulate?horizon=7` | What-if forecast after applying the action |
-| POST | `/actions/refresh` | Regenerate actions 🔑 |
-| GET | `/prospectivity/meta` | Tile URL template + bounds for the map |
-| POST | `/ingest/{production\|weather\|blasts\|equipment}` | CSV upload with validation and upsert 🔑 |
+| Prospectivity | LightGBM, spatial-block validation, SHAP | Prospectivity scores for rasterized feature data |
+| Reserve estimation | 3D ordinary kriging and 100 conditional block simulations | Approximate P10/P50/P90 tonnes and grade distribution |
+| Shortfall risk | Quantile LightGBM over daily production efficiency and forecast signals | Risk level, fan chart, and contributing drivers |
+| Recommendations | Operational rules and PuLP redeployment optimization | Ranked actions and what-if forecast |
 
-🔑 = requires `X-API-Key`.
+API base: `/api/v1`. Interactive OpenAPI docs: `/docs`.
 
-### Data adapter (the "works on MOIL's real data" proof)
+| Method | Endpoint | Use |
+|---|---|---|
+| GET | `/health` | Runtime mode, model availability, and data provenance |
+| GET | `/mines`, `/risk/{code}` | Mine summaries and shortfall forecast |
+| GET / POST | `/reserves/{code}` / `/reserves/{code}/recompute` | Read or compute reserve estimate; recompute is protected |
+| GET | `/actions`, `/actions/{id}/simulate` | Recommendations and action scenario |
+| POST | `/actions/refresh` | Regenerate recommendations; protected |
+| POST | `/ingest/{kind}` | Validate and ingest CSV; protected |
+| GET | `/ingest/template/{kind}`, `/ingest/records/{kind}` | CSV templates and latest records; protected |
 
-Real data drops into a fixed CSV schema, uploaded from the **Data adapter** page or `POST /ingest/{kind}`:
+The prospectivity raster endpoint is available when a trained raster model and COG are configured. Without those assets, the map still displays mine and regional deposit layers.
 
-| kind | required columns |
-|---|---|
-| `production` | `mine_code,date,planned_t,actual_t` |
-| `weather` | `mine_code,date,rain_mm` |
-| `blasts` | `mine_code,date,delayed` |
-| `equipment` | `mine_code,unit_code,date,available_hours,scheduled_hours,breakdown` |
-
----
-
-## Models
-
-| | Module | Method | Output |
-|---|---|---|---|
-| A | Prospectivity | LightGBM + **spatial block CV** + SHAP | probability COG → map layer |
-| B | Reserve estimation | `OrdinaryKriging3D` on assays, 200 sims | P10/P50/P90 tonnes |
-| C | Shortfall forecast | quantile LightGBM (0.1/0.5/0.9) on daily efficiency `actual/planned`, rolled over the weather forecast | fan chart, drivers, risk level |
-| D | Recommender | rules + PuLP redeploy optimizer | ranked actions + what-if simulation |
-
-Module C predicts *efficiency*, not tonnes, and rolls it forward over the forecast — that gives the fan chart directly. A counterfactual pass with `avail = 1.0` splits the predicted loss into **weather** vs **equipment**, which is what the "Why output drops" bar shows.
-
-### Validation
-
-| Module | Metric |
-|---|---|
-| Prospectivity | AUC-PR under spatial block CV; % of known deposits captured in top 10% of area |
-| Reserves | Kriging cross-validation error; P10–P90 coverage on synthetic ground truth |
-| Shortfall | Pinball loss; quantile coverage (q10–q90 should contain ≈ 80% of outcomes — printed by `make train`) |
-| Recommender | Backtested tonnes recovered in the simulator vs a no-action baseline |
+## Development
 
 ```bash
-make test     # unit tests: optimizer + causal feature construction
+make test
 ```
 
----
+The backend tests cover API endpoints, feature construction, optimization, and recommendations. Retrain the shortfall model with `make train`; feature generation is shared between training and serving to reduce train/serve skew.
 
-## Honesty notes (say these out loud in the pitch)
+## Important Assumptions
 
-- **Never** say "satellite finds manganese." Say "satellite-derived indicators rank prospective zones; drill data quantifies them."
-- Prospectivity labels are **positive-unlabeled** — negatives are pseudo-absences drawn outside a buffer around known deposits.
-- **Spatial leakage** is the fastest way to lose Q&A. Random CV gives fake 0.99 AUCs; `train_prospectivity.py` blocks by a 0.1° grid.
-- Kriging errors are treated as independent per block, which gives a **narrower** range than a proper conditional simulation. The UI says "approximate P10–P90".
-- Ops data is **synthetic** (`app/ml/synth.py`), disclosed by a badge in the UI. MOIL's real data drops straight into the CSV adapter above.
-- `RECOVERABLE = 0.40` in `recommend_service.py` — the share of predicted loss an action wins back — is an **assumption to tune with MOIL**, not a measured figure.
+- Prospectivity ranks areas for investigation; drill data is required to estimate grade and tonnes.
+- Known-deposit labels are positive-unlabeled; spatial-block validation helps limit geographic leakage.
+- Reserve P10/P50/P90 values are approximate and depend on assay coverage and modeling assumptions.
+- Recommendation recovery rates are assumptions to calibrate with MOIL operational history, not guaranteed production gains.
 
----
-
-## Demo script (2 minutes)
-
-1. **Command center.** Point at the SYNTHETIC DEMO DATA badge; the adapter is ready for MOIL's real CSVs.
-2. **Map:** toggle the prospectivity layer over satellite imagery ("space tech finds where to drill").
-3. **Click a mine:** reserve P10/P50/P90 ("drill data says how much").
-4. **Red banner:** storm in 3 days; the fan chart shows rain bars and a widening band; the loss-split bar shows the drop is weather-driven.
-5. **"Simulate impact"** on *Advance blasting and pre-stock ore*: the green line lifts, header reads "+X t recovered". **This is the money shot.**
-6. **Switch to Balaghat:** the redeploy action (broken unit, spare capacity elsewhere).
-7. **Data adapter:** drop a CSV, forecasts refresh live.
-8. **Export brief** — the one-page PDF a shift manager would actually use.
-# manganese
+For the full MVP plan and rationale, see [`moil_manganese_mvp_plan.md`](moil_manganese_mvp_plan.md).
